@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <title>台北 YouBike 即時地圖</title>
 <meta name="description" content="以 Leaflet.js + OpenStreetMap 呈現臺北市 YouBike 2.0 站點即時車輛與空位。">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
@@ -144,6 +145,8 @@
 
   /* ---------- Leaflet dark overrides ---------- */
   .leaflet-container { font-family: inherit; }
+  /* 把 OSM 標準圖磚轉成深色：反轉明暗後再把色相轉回來，水仍是藍、公園仍是綠 */
+  .tiles-dark { filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%) saturate(60%); }
   .leaflet-bar a, .leaflet-control-layers {
     background: var(--panel); color: var(--text); border-color: var(--line);
   }
@@ -247,7 +250,7 @@
     <section class="about">
       <h2>關於</h2>
       <p>資料來源：<a href="https://data.taipei/dataset/detail?id=c6bc8aed-557d-41d5-bfb1-8da24f78f2fb" target="_blank" rel="noopener">臺北市資料大平臺「YouBike 2.0 臺北市公共自行車即時資訊」</a>，每 60 秒自動更新。顯示的「資料時間」是資料來源本身的更新時間，可能與現場有落差。</p>
-      <p>地圖：<a href="https://leafletjs.com/" target="_blank" rel="noopener">Leaflet.js</a>；底圖 © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> 貢獻者，深色底圖由 <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a> 提供。</p>
+      <p>地圖：<a href="https://leafletjs.com/" target="_blank" rel="noopener">Leaflet.js</a>；底圖 © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> 貢獻者（深色模式為同一份 OSM 圖磚經 CSS 濾鏡處理，不需任何 API 金鑰）。</p>
       <p>設計靈感：<a href="https://manpopex.us/" target="_blank" rel="noopener">Manhattan Population Explorer</a>。</p>
     </section>
   </aside>
@@ -315,14 +318,11 @@
   // ================= 地圖 =================
   const map = L.map('map', { preferCanvas: true }).setView(CENTER, ZOOM);
   const osmAttr = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> 貢獻者';
-  const darkLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    subdomains: 'abcd', maxZoom: 20,
-    attribution: osmAttr + ' &copy; <a href="https://carto.com/attributions">CARTO</a>',
-  }).addTo(map);
-  const osmLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19, attribution: osmAttr,
-  });
-  L.control.layers({ '深色底圖': darkLayer, 'OpenStreetMap 標準': osmLayer }, null, { position: 'topright' }).addTo(map);
+  // 兩種底圖都是 OSM 官方圖磚（免金鑰）；深色版以 CSS 濾鏡反轉顏色（見 .tiles-dark）
+  const OSM_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+  const darkLayer = L.tileLayer(OSM_URL, { maxZoom: 19, attribution: osmAttr, className: 'tiles-dark' }).addTo(map);
+  const osmLayer = L.tileLayer(OSM_URL, { maxZoom: 19, attribution: osmAttr });
+  L.control.layers({ 'OpenStreetMap 深色': darkLayer, 'OpenStreetMap 標準': osmLayer }, null, { position: 'topright' }).addTo(map);
   const stationLayer = L.layerGroup().addTo(map);
   let userLayer = null;
 
