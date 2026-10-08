@@ -1,0 +1,716 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>台北 YouBike 即時地圖</title>
+<meta name="description" content="以 Leaflet.js + OpenStreetMap 呈現臺北市 YouBike 2.0 站點即時車輛與空位。">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #141a22;
+    --panel2: #1b232e;
+    --line: #263140;
+    --text: #e6edf3;
+    --muted: #8b98a8;
+    --accent: #2ec4b6;
+    --ok: #7bd389;
+    --warn: #ffd166;
+    --err: #ff5a5f;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    display: flex; flex-direction: column;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; color: inherit; }
+  [hidden] { display: none !important; }
+
+  /* ---------- Header ---------- */
+  header {
+    height: 56px; flex: none;
+    display: flex; align-items: center; gap: 12px;
+    padding: 0 16px;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  header h1 {
+    margin: 0; font-size: 17px; font-weight: 600; letter-spacing: .02em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  header h1 small {
+    margin-left: 8px; font-size: 11px; font-weight: 400; color: var(--muted);
+    letter-spacing: .12em; text-transform: uppercase;
+  }
+  .status {
+    margin-left: auto; display: flex; align-items: center; gap: 10px;
+    font-size: 13px; color: var(--muted); white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.ok { background: var(--ok); box-shadow: 0 0 0 3px rgba(123, 211, 137, .18); }
+  .dot.warn { background: var(--warn); box-shadow: 0 0 0 3px rgba(255, 209, 102, .18); }
+  .dot.err { background: var(--err); box-shadow: 0 0 0 3px rgba(255, 90, 95, .18); }
+  .dot.loading { background: var(--accent); animation: blink 1s ease-in-out infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+
+  .btn {
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 6px;
+    padding: 6px 12px; cursor: pointer; color: var(--text); font-size: 13px;
+  }
+  .btn:hover:not(:disabled) { border-color: var(--accent); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .menu-btn { display: none; padding: 6px 10px; font-size: 16px; line-height: 1; }
+
+  /* ---------- Layout ---------- */
+  main { flex: 1; display: flex; min-height: 0; position: relative; }
+  aside {
+    width: 320px; flex: none; overflow-y: auto;
+    background: var(--panel); border-right: 1px solid var(--line);
+  }
+  aside section { padding: 16px 18px; border-bottom: 1px solid var(--line); }
+  aside h2 {
+    margin: 0 0 10px; font-size: 11px; font-weight: 600; color: var(--muted);
+    letter-spacing: .12em; text-transform: uppercase;
+  }
+  #mapWrap { flex: 1; position: relative; min-width: 0; }
+  #map { position: absolute; inset: 0; background: #0b0e13; }
+
+  /* ---------- Sidebar parts ---------- */
+  .seg { display: flex; padding: 3px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+  .seg button {
+    flex: 1; padding: 7px 0; border: 0; border-radius: 6px;
+    background: transparent; color: var(--muted); cursor: pointer; font-size: 13px;
+  }
+  .seg button[aria-pressed="true"] { background: var(--panel2); color: var(--text); box-shadow: inset 0 0 0 1px var(--line); }
+
+  .legend-title { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .legend-row { display: flex; align-items: center; gap: 10px; padding: 3px 0; font-size: 13px; }
+  .sw { width: 12px; height: 12px; border-radius: 50%; flex: none; border: 1px solid rgba(0, 0, 0, .5); }
+  .legend-row .n { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .row-btns { display: flex; gap: 8px; margin-bottom: 10px; }
+  .row-btns .btn { padding: 4px 10px; font-size: 12px; }
+  .districts { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px; }
+  .districts label { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 13px; cursor: pointer; }
+  .districts input { accent-color: var(--accent); margin: 0; }
+  .districts .cnt { margin-left: auto; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .stat { padding: 8px 10px; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; }
+  .stat b { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
+  .stat span { font-size: 11px; color: var(--muted); }
+  .rank { margin-top: 14px; }
+  .rank-title { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .rank-row { display: grid; grid-template-columns: 76px 1fr 64px; align-items: center; gap: 8px; padding: 3px 0; font-size: 12px; }
+  .rank-bar { height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+  .rank-bar span { display: block; height: 100%; background: var(--err); border-radius: 3px; }
+  .rank-row .v { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .near-msg { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.6; }
+  .near-list { list-style: none; margin: 10px 0 0; padding: 0; }
+  .near-list button {
+    width: 100%; display: flex; align-items: center; gap: 10px; text-align: left;
+    padding: 8px 10px; margin-bottom: 6px; cursor: pointer;
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 8px;
+  }
+  .near-list button:hover { border-color: var(--accent); }
+  .near-list .nm { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .near-list .meta { font-size: 11px; color: var(--muted); white-space: nowrap; text-align: right; }
+
+  .about p { margin: 0 0 8px; font-size: 12px; line-height: 1.7; color: var(--muted); }
+  .about a { color: var(--accent); }
+
+  /* ---------- Map overlays ---------- */
+  #banner {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 1001;
+    max-width: calc(100% - 140px); padding: 8px 14px; border-radius: 8px;
+    font-size: 13px; line-height: 1.5; box-shadow: 0 6px 20px rgba(0, 0, 0, .45);
+  }
+  #banner.warn { background: #3a3214; color: var(--warn); border: 1px solid #6b5a1e; }
+  #banner.err { background: #3a1618; color: #ffb3b5; border: 1px solid #7a2a2e; }
+  #fatal {
+    position: absolute; inset: 0; z-index: 1002;
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+    background: rgba(13, 17, 23, .94);
+  }
+  #fatal .box { max-width: 380px; text-align: center; }
+  #fatal h3 { margin: 0 0 8px; font-size: 18px; }
+  #fatal p { margin: 0 0 16px; font-size: 13px; color: var(--muted); line-height: 1.6; }
+  .scrim { display: none; }
+
+  /* ---------- Leaflet dark overrides ---------- */
+  .leaflet-container { font-family: inherit; }
+  .leaflet-bar a, .leaflet-control-layers {
+    background: var(--panel); color: var(--text); border-color: var(--line);
+  }
+  .leaflet-bar a:hover { background: var(--panel2); }
+  .leaflet-bar { border: 1px solid var(--line) !important; }
+  .leaflet-control-layers { border: 1px solid var(--line) !important; border-radius: 8px; }
+  .leaflet-control-layers-toggle { filter: invert(1) hue-rotate(180deg); }
+  .leaflet-control-layers-expanded { padding: 8px 12px; font-size: 13px; }
+  .leaflet-control-attribution { background: rgba(13, 17, 23, .75) !important; color: var(--muted); }
+  .leaflet-control-attribution a { color: #a8b5c4; }
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip {
+    background: var(--panel); color: var(--text); border: 1px solid var(--line);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, .55);
+  }
+  .leaflet-popup-content-wrapper { border-radius: 10px; }
+  .leaflet-popup-content { margin: 14px 16px; font-size: 13px; line-height: 1.5; }
+  .leaflet-container a.leaflet-popup-close-button { color: var(--muted); }
+
+  /* ---------- Popup ---------- */
+  .pop-title { font-size: 15px; font-weight: 600; padding-right: 14px; margin-bottom: 2px; }
+  .pop-sub { font-size: 12px; color: var(--muted); }
+  .pop-badge { display: inline-block; margin-top: 6px; padding: 1px 8px; border-radius: 10px; background: #3a3f47; color: #cfd6df; font-size: 11px; }
+  .pop-nums { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 10px 0 8px; }
+  .pop-nums div { padding: 6px 4px; text-align: center; background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; }
+  .pop-nums div.hl { border-color: var(--accent); }
+  .pop-nums b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+  .pop-nums span { font-size: 11px; color: var(--muted); }
+  .pop-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: #2a323d; }
+  .pop-bar .r { background: var(--accent); }
+  .pop-bar .d { background: #5b6b80; }
+  .pop-bar-legend { display: flex; justify-content: space-between; margin-top: 4px; font-size: 11px; color: var(--muted); }
+  .pop-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 10px; font-size: 11px; color: var(--muted); }
+  .leaflet-container .pop-foot a { color: var(--accent); text-decoration: none; white-space: nowrap; }
+
+  /* ---------- Mobile ---------- */
+  @media (max-width: 860px) {
+    .menu-btn { display: inline-flex; }
+    header { padding: 0 12px; gap: 10px; }
+    header h1 { font-size: 15px; }
+    header h1 small, .status .long { display: none; }
+    aside {
+      position: absolute; top: 0; bottom: 0; left: 0; z-index: 1004;
+      width: min(320px, 86vw);
+      transform: translateX(-100%); transition: transform .25s ease;
+      box-shadow: 8px 0 24px rgba(0, 0, 0, .5);
+    }
+    body.sidebar-open aside { transform: none; }
+    body.sidebar-open .scrim { display: block; position: absolute; inset: 0; z-index: 1003; background: rgba(0, 0, 0, .45); }
+    #banner { top: auto; bottom: 28px; max-width: calc(100% - 24px); width: max-content; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <button class="btn menu-btn" id="menuBtn" aria-label="開關側欄" aria-expanded="false">☰</button>
+  <h1>台北 YouBike 即時地圖<small>Taipei YouBike Explorer</small></h1>
+  <div class="status">
+    <span class="dot loading" id="statusDot"></span>
+    <span id="statusText">載入中…</span>
+    <button class="btn" id="refreshBtn">重新整理</button>
+  </div>
+</header>
+
+<main>
+  <aside id="sidebar">
+    <section>
+      <h2>顯示模式</h2>
+      <div class="seg" role="group" aria-label="顯示模式">
+        <button data-mode="rent" aria-pressed="true">借車模式</button>
+        <button data-mode="return" aria-pressed="false">還車模式</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>圖例</h2>
+      <div id="legend"></div>
+    </section>
+
+    <section>
+      <h2>附近站點</h2>
+      <button class="btn" id="locateBtn" style="width:100%">📍 定位我，找最近的站</button>
+      <div class="near-msg" id="nearMsg" hidden></div>
+      <ul class="near-list" id="nearList"></ul>
+    </section>
+
+    <section>
+      <h2>行政區</h2>
+      <div class="row-btns">
+        <button class="btn" id="allBtn">全選</button>
+        <button class="btn" id="noneBtn">全不選</button>
+      </div>
+      <div class="districts" id="districts"></div>
+    </section>
+
+    <section>
+      <h2>統計（已勾選行政區）</h2>
+      <div class="stats" id="stats"></div>
+      <div class="rank" id="rank"></div>
+    </section>
+
+    <section class="about">
+      <h2>關於</h2>
+      <p>資料來源：<a href="https://data.taipei/dataset/detail?id=c6bc8aed-557d-41d5-bfb1-8da24f78f2fb" target="_blank" rel="noopener">臺北市資料大平臺「YouBike 2.0 臺北市公共自行車即時資訊」</a>，每 60 秒自動更新。顯示的「資料時間」是資料來源本身的更新時間，可能與現場有落差。</p>
+      <p>地圖：<a href="https://leafletjs.com/" target="_blank" rel="noopener">Leaflet.js</a>；底圖 © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> 貢獻者，深色底圖由 <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a> 提供。</p>
+      <p>設計靈感：<a href="https://manpopex.us/" target="_blank" rel="noopener">Manhattan Population Explorer</a>。</p>
+    </section>
+  </aside>
+  <div class="scrim" id="scrim"></div>
+
+  <div id="mapWrap">
+    <div id="map"></div>
+    <div id="banner" hidden></div>
+    <div id="fatal" hidden>
+      <div class="box">
+        <h3>無法載入 YouBike 資料</h3>
+        <p id="fatalMsg"></p>
+        <button class="btn" id="retryBtn">重試</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(() => {
+  'use strict';
+
+  // ================= 設定 =================
+  const API_URL = 'https://tcgbusfs.blob.core.windows.net/dotapp/youbike/v2/youbike_immediate.json';
+  const REFRESH_MS = 60 * 1000;          // 自動更新間隔
+  const STALE_MS = 10 * 60 * 1000;       // 資料時間超過此值視為延遲
+  const FETCH_TIMEOUT_MS = 15 * 1000;
+  const CENTER = [25.0478, 121.5170];    // 台北車站
+  const ZOOM = 13;
+  const DISTRICT_ORDER = ['中正區', '大同區', '中山區', '松山區', '大安區', '萬華區',
+    '信義區', '士林區', '北投區', '內湖區', '南港區', '文山區'];
+  const BINS = [
+    { min: 0, max: 0, color: '#ff5a5f', label: '0' },
+    { min: 1, max: 3, color: '#ff9f43', label: '1 – 3' },
+    { min: 4, max: 10, color: '#ffd166', label: '4 – 10' },
+    { min: 11, max: 20, color: '#7bd389', label: '11 – 20' },
+    { min: 21, max: Infinity, color: '#2ec4b6', label: '21 以上' },
+  ];
+  const INACTIVE_COLOR = '#6b7280';
+  const MODE_TEXT = {
+    rent: { unit: '台', legend: '可借車數（台）', has: '有車', rankLabel: '無車站' },
+    return: { unit: '格', legend: '可還空位（格）', has: '有空位', rankLabel: '滿站（無空位）' },
+  };
+
+  // ================= 狀態 =================
+  const state = {
+    mode: 'rent',
+    stations: new Map(),   // sno -> station
+    markers: new Map(),    // sno -> L.CircleMarker
+    districts: [],         // 依序排列的行政區
+    selected: new Set(),
+    hasLoaded: false,
+    loading: false,
+    lastFetchOk: null,     // 最後一次成功抓取的時間（Date）
+    dataTime: null,        // 資料來源本身的更新時間（Date）
+    lastError: null,
+    nextAt: 0,
+    timer: null,
+    user: null,            // L.LatLng
+  };
+
+  const $ = (id) => document.getElementById(id);
+
+  // ================= 地圖 =================
+  const map = L.map('map', { preferCanvas: true }).setView(CENTER, ZOOM);
+  const osmAttr = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> 貢獻者';
+  const darkLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    subdomains: 'abcd', maxZoom: 20,
+    attribution: osmAttr + ' &copy; <a href="https://carto.com/attributions">CARTO</a>',
+  }).addTo(map);
+  const osmLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: osmAttr,
+  });
+  L.control.layers({ '深色底圖': darkLayer, 'OpenStreetMap 標準': osmLayer }, null, { position: 'topright' }).addTo(map);
+  const stationLayer = L.layerGroup().addTo(map);
+  let userLayer = null;
+
+  // ================= 工具函式 =================
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const cleanName = (s) => String(s || '').replace(/^YouBike2\.0_/, '');
+  function parseTpe(s) {               // "2026-10-08 12:39:02"（台北時間）→ Date
+    if (!s) return null;
+    const d = new Date(String(s).trim().replace(' ', 'T') + '+08:00');
+    return isNaN(d) ? null : d;
+  }
+  const fmtHMS = (d) => d ? d.toLocaleTimeString('zh-TW', { hour12: false, timeZone: 'Asia/Taipei' }) : '—';
+  const fmtHM = (d) => d ? d.toLocaleTimeString('zh-TW', { hour12: false, timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit' }) : '—';
+  function fmtAgo(ms) {
+    const m = Math.round(ms / 60000);
+    if (m < 60) return `${m} 分鐘`;
+    return `${Math.floor(m / 60)} 小時 ${m % 60} 分`;
+  }
+  const fmtDist = (m) => m < 1000 ? `${Math.round(m / 10) * 10} 公尺` : `${(m / 1000).toFixed(1)} 公里`;
+
+  function normalize(r) {
+    const lat = Number(r.latitude), lng = Number(r.longitude);
+    if (!isFinite(lat) || !isFinite(lng) || lat === 0 || lng === 0) return null;
+    return {
+      sno: String(r.sno),
+      name: cleanName(r.sna),
+      district: r.sarea || '未分類',
+      address: r.ar || '',
+      total: Number(r.Quantity) || 0,
+      rent: Number(r.available_rent_bikes) || 0,
+      ret: Number(r.available_return_bikes) || 0,
+      active: String(r.act) === '1',
+      lat, lng,
+      time: parseTpe(r.mday) || parseTpe(r.infoTime),
+      feedTime: parseTpe(r.updateTime) || parseTpe(r.srcUpdateTime),
+    };
+  }
+
+  const valueOf = (s) => state.mode === 'rent' ? s.rent : s.ret;
+  const binOf = (v) => BINS.find((b) => v >= b.min && v <= b.max);
+  const colorOf = (s) => s.active ? binOf(valueOf(s)).color : INACTIVE_COLOR;
+  function radiusFor(z) { return z >= 16 ? 9 : z >= 15 ? 7 : z >= 14 ? 6 : z >= 13 ? 5 : 4; }
+  function styleOf(s) {
+    return {
+      radius: radiusFor(map.getZoom()),
+      color: '#0b0e13', weight: 1, opacity: 0.8,
+      fillColor: colorOf(s), fillOpacity: s.active ? 0.9 : 0.55,
+    };
+  }
+
+  // ================= Popup =================
+  function popupHtml(s) {
+    const t = s.total || 1;
+    const rp = Math.min(100, Math.round(s.rent / t * 100));
+    const dp = Math.min(100 - rp, Math.round(s.ret / t * 100));
+    const nav = `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}&travelmode=walking`;
+    const c = s.active ? binOf(valueOf(s)).color : INACTIVE_COLOR;
+    const rentHl = state.mode === 'rent', retHl = state.mode === 'return';
+    return `<div class="pop">
+      <div class="pop-title">${esc(s.name)}</div>
+      <div class="pop-sub">${esc(s.district)}・${esc(s.address)}</div>
+      ${s.active ? '' : '<span class="pop-badge">暫停營運</span>'}
+      <div class="pop-nums">
+        <div class="${rentHl ? 'hl' : ''}"><b style="${rentHl ? `color:${c}` : ''}">${s.rent}</b><span>可借車輛</span></div>
+        <div class="${retHl ? 'hl' : ''}"><b style="${retHl ? `color:${c}` : ''}">${s.ret}</b><span>可還空位</span></div>
+        <div><b>${s.total}</b><span>總車位</span></div>
+      </div>
+      <div class="pop-bar" title="車輛 ${rp}%／空位 ${dp}%"><span class="r" style="width:${rp}%"></span><span class="d" style="width:${dp}%"></span></div>
+      <div class="pop-bar-legend"><span>車輛 ${rp}%</span><span>空位 ${dp}%</span></div>
+      <div class="pop-foot">
+        <span>資料時間 ${fmtHMS(s.time)}</span>
+        <a href="${nav}" target="_blank" rel="noopener">Google 地圖導航 ↗</a>
+      </div>
+    </div>`;
+  }
+
+  // ================= 標記更新 =================
+  function upsertStations(list) {
+    const seen = new Set();
+    for (const s of list) {
+      seen.add(s.sno);
+      state.stations.set(s.sno, s);
+      let m = state.markers.get(s.sno);
+      if (!m) {
+        m = L.circleMarker([s.lat, s.lng], styleOf(s));
+        const sno = s.sno;
+        // 以函式提供內容：每次開啟時都讀取最新資料
+        m.bindPopup(() => popupHtml(state.stations.get(sno)), { minWidth: 230, maxWidth: 280 });
+        state.markers.set(sno, m);
+      } else {
+        m.setLatLng([s.lat, s.lng]);
+        m.setStyle(styleOf(s));
+        // 正開著的 Popup 只更新內容，不關閉
+        if (m.isPopupOpen()) m.getPopup().update();
+      }
+    }
+    for (const [sno, m] of state.markers) {
+      if (!seen.has(sno)) {
+        stationLayer.removeLayer(m);
+        state.markers.delete(sno);
+        state.stations.delete(sno);
+      }
+    }
+  }
+
+  function restyleAll() {
+    for (const [sno, m] of state.markers) {
+      m.setStyle(styleOf(state.stations.get(sno)));
+      if (m.isPopupOpen()) m.getPopup().update();
+    }
+  }
+
+  function applyFilter() {
+    for (const [sno, m] of state.markers) {
+      const show = state.selected.has(state.stations.get(sno).district);
+      const has = stationLayer.hasLayer(m);
+      if (show && !has) stationLayer.addLayer(m);
+      else if (!show && has) stationLayer.removeLayer(m);
+    }
+  }
+
+  // ================= 行政區 =================
+  function districtRank(d) {
+    const i = DISTRICT_ORDER.indexOf(d);
+    return i === -1 ? 99 : i;
+  }
+
+  function syncDistricts() {
+    const found = new Set();
+    for (const s of state.stations.values()) found.add(s.district);
+    const sorted = [...found].sort((a, b) => districtRank(a) - districtRank(b) || a.localeCompare(b, 'zh-Hant'));
+    const prev = new Set(state.districts);
+    for (const d of sorted) if (!prev.has(d)) state.selected.add(d);   // 新出現的行政區預設勾選
+    for (const d of [...state.selected]) if (!found.has(d)) state.selected.delete(d);
+    state.districts = sorted;
+  }
+
+  function renderDistricts() {
+    const counts = new Map();
+    for (const s of state.stations.values()) counts.set(s.district, (counts.get(s.district) || 0) + 1);
+    $('districts').innerHTML = state.districts.map((d) => `
+      <label><input type="checkbox" data-d="${esc(d)}" ${state.selected.has(d) ? 'checked' : ''}>
+      ${esc(d)}<span class="cnt">${counts.get(d) || 0}</span></label>`).join('');
+  }
+
+  // ================= 圖例與統計 =================
+  function visibleStations() {
+    const out = [];
+    for (const s of state.stations.values()) if (state.selected.has(s.district)) out.push(s);
+    return out;
+  }
+
+  function renderLegend(vis) {
+    const binCounts = BINS.map(() => 0);
+    let inactive = 0;
+    for (const s of vis) {
+      if (!s.active) { inactive++; continue; }
+      binCounts[BINS.indexOf(binOf(valueOf(s)))]++;
+    }
+    $('legend').innerHTML = `<div class="legend-title">${MODE_TEXT[state.mode].legend}・站數</div>` +
+      BINS.map((b, i) => `<div class="legend-row"><span class="sw" style="background:${b.color}"></span>${b.label}<span class="n">${binCounts[i]}</span></div>`).join('') +
+      `<div class="legend-row"><span class="sw" style="background:${INACTIVE_COLOR}"></span>暫停營運<span class="n">${inactive}</span></div>`;
+  }
+
+  function renderStats(vis) {
+    let bikes = 0, docks = 0, empty = 0, full = 0, inactive = 0;
+    const per = new Map();
+    for (const s of vis) {
+      const p = per.get(s.district) || { n: 0, empty: 0, full: 0 };
+      p.n++;
+      per.set(s.district, p);
+      if (!s.active) { inactive++; continue; }
+      bikes += s.rent; docks += s.ret;
+      if (s.rent === 0) { empty++; p.empty++; }
+      if (s.ret === 0) { full++; p.full++; }
+    }
+    const n = (x) => x.toLocaleString('zh-TW');
+    $('stats').innerHTML = `
+      <div class="stat"><b>${n(vis.length)}</b><span>站點</span></div>
+      <div class="stat"><b>${n(bikes)}</b><span>可借車輛</span></div>
+      <div class="stat"><b>${n(docks)}</b><span>可還空位</span></div>
+      <div class="stat"><b style="color:var(--err)">${n(empty)}</b><span>無車站</span></div>
+      <div class="stat"><b style="color:var(--warn)">${n(full)}</b><span>滿站</span></div>
+      <div class="stat"><b style="color:${INACTIVE_COLOR}">${n(inactive)}</b><span>暫停營運</span></div>`;
+
+    const key = state.mode === 'rent' ? 'empty' : 'full';
+    const rows = [...per.entries()].map(([d, p]) => ({ d, v: p[key], n: p.n }))
+      .sort((a, b) => b.v - a.v || b.v / b.n - a.v / a.n);
+    const max = Math.max(1, ...rows.map((r) => r.v));
+    $('rank').innerHTML = rows.length
+      ? `<div class="rank-title">各區${MODE_TEXT[state.mode].rankLabel}數</div>` +
+        rows.map((r) => `<div class="rank-row"><span>${esc(r.d)}</span>
+          <div class="rank-bar"><span style="width:${r.v / max * 100}%;background:${key === 'empty' ? 'var(--err)' : 'var(--warn)'}"></span></div>
+          <span class="v">${r.v} / ${r.n}</span></div>`).join('')
+      : '<div class="rank-title">尚未勾選任何行政區</div>';
+  }
+
+  function renderAll() {
+    const vis = visibleStations();
+    renderLegend(vis);
+    renderStats(vis);
+    renderNearest();
+  }
+
+  // ================= 定位與最近站點 =================
+  function renderNearest() {
+    if (!state.user) return;
+    const list = $('nearList'), msg = $('nearMsg');
+    const cands = visibleStations().filter((s) => s.active && valueOf(s) > 0)
+      .map((s) => ({ s, d: state.user.distanceTo([s.lat, s.lng]) }))
+      .sort((a, b) => a.d - b.d).slice(0, 3);
+    if (!cands.length) {
+      list.innerHTML = '';
+      msg.hidden = false;
+      msg.textContent = `已勾選的行政區中找不到${MODE_TEXT[state.mode].has}的站點。`;
+      return;
+    }
+    msg.hidden = cands[0].d < 20000;
+    if (cands[0].d >= 20000) msg.textContent = '你目前似乎不在臺北市，以下是距離最近的站點。';
+    list.innerHTML = cands.map(({ s, d }) => `
+      <li><button data-sno="${esc(s.sno)}">
+        <span class="sw" style="background:${colorOf(s)}"></span>
+        <span class="nm">${esc(s.name)}</span>
+        <span class="meta">${valueOf(s)} ${MODE_TEXT[state.mode].unit}<br>${fmtDist(d)}</span>
+      </button></li>`).join('');
+  }
+
+  function locate() {
+    const msg = $('nearMsg');
+    if (!navigator.geolocation) {
+      msg.hidden = false; msg.textContent = '這個瀏覽器不支援定位功能。';
+      return;
+    }
+    $('locateBtn').disabled = true;
+    msg.hidden = false; msg.textContent = '定位中…';
+    navigator.geolocation.getCurrentPosition((pos) => {
+      $('locateBtn').disabled = false;
+      msg.hidden = true;
+      state.user = L.latLng(pos.coords.latitude, pos.coords.longitude);
+      if (userLayer) map.removeLayer(userLayer);
+      userLayer = L.layerGroup([
+        L.circle(state.user, { radius: pos.coords.accuracy, color: '#4ea1ff', weight: 1, fillOpacity: 0.08, interactive: false }),
+        L.circleMarker(state.user, { radius: 7, color: '#ffffff', weight: 2, fillColor: '#4ea1ff', fillOpacity: 1 }).bindPopup('你的位置'),
+      ]).addTo(map);
+      map.flyTo(state.user, Math.max(map.getZoom(), 16));
+      renderNearest();
+    }, (err) => {
+      $('locateBtn').disabled = false;
+      msg.hidden = false;
+      msg.textContent = err.code === 1 ? '你拒絕了定位權限，可以在瀏覽器設定中重新允許。'
+        : '無法取得位置，請稍後再試。';
+    }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 });
+  }
+
+  function focusStation(sno) {
+    const m = state.markers.get(sno);
+    if (!m) return;
+    closeSidebar();
+    map.flyTo(m.getLatLng(), Math.max(map.getZoom(), 17));
+    map.once('moveend', () => m.openPopup());
+  }
+
+  // ================= 資料抓取 =================
+  async function load() {
+    if (state.loading) return;
+    state.loading = true;
+    clearTimeout(state.timer);
+    updateStatus();
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(API_URL, { cache: 'no-store', signal: ctrl.signal });
+      if (!res.ok) throw new Error(`伺服器回應 HTTP ${res.status}`);
+      const raw = await res.json();
+      const arr = Array.isArray(raw) ? raw : (raw && raw.retVal ? Object.values(raw.retVal) : null);
+      if (!arr) throw new Error('資料格式與預期不符');
+      const list = arr.map(normalize).filter(Boolean);
+      if (!list.length) throw new Error('沒有任何站點資料');
+
+      upsertStations(list);
+      let latest = null;
+      for (const s of list) {
+        const t = s.feedTime || s.time;
+        if (t && (!latest || t > latest)) latest = t;
+      }
+      state.dataTime = latest;
+      state.lastFetchOk = new Date();
+      state.lastError = null;
+      state.hasLoaded = true;
+
+      syncDistricts();
+      renderDistricts();
+      applyFilter();
+      renderAll();
+      $('fatal').hidden = true;
+    } catch (e) {
+      state.lastError = e.name === 'AbortError' ? '連線逾時' : (e.message || '未知錯誤');
+      if (!state.hasLoaded) {
+        $('fatalMsg').textContent = `原因：${state.lastError}。請確認網路連線後重試。`;
+        $('fatal').hidden = false;
+      }
+    } finally {
+      clearTimeout(to);
+      state.loading = false;
+      state.nextAt = Date.now() + REFRESH_MS;
+      state.timer = setTimeout(load, REFRESH_MS);
+      updateStatus();
+    }
+  }
+
+  // ================= 狀態列與提示 =================
+  function updateStatus() {
+    const now = Date.now();
+    const stale = state.dataTime && now - state.dataTime > STALE_MS;
+    const dot = $('statusDot'), text = $('statusText'), banner = $('banner');
+
+    dot.className = 'dot ' + (state.loading ? 'loading' : state.lastError ? 'err' : stale ? 'warn' : state.hasLoaded ? 'ok' : '');
+    $('refreshBtn').disabled = state.loading;
+
+    if (state.loading) {
+      text.innerHTML = state.hasLoaded ? '更新中…' : '載入中…';
+    } else if (!state.hasLoaded) {
+      text.innerHTML = '載入失敗';
+    } else {
+      const secs = Math.max(0, Math.ceil((state.nextAt - now) / 1000));
+      text.innerHTML = `<span class="long">資料時間 </span>${fmtHM(state.dataTime)}<span class="long"> · 下次更新</span> ${secs}s`;
+    }
+
+    if (state.hasLoaded && state.lastError) {
+      banner.className = 'err';
+      banner.textContent = `更新失敗（${state.lastError}），目前顯示 ${fmtHMS(state.lastFetchOk)} 抓到的資料，將自動重試。`;
+      banner.hidden = false;
+    } else if (stale) {
+      banner.className = 'warn';
+      banner.textContent = `資料來源已 ${fmtAgo(now - state.dataTime)}未更新（資料時間 ${fmtHM(state.dataTime)}），數字可能與現場不同。`;
+      banner.hidden = false;
+    } else {
+      banner.hidden = true;
+    }
+  }
+
+  // ================= 側欄（手機） =================
+  function openSidebar() { document.body.classList.add('sidebar-open'); $('menuBtn').setAttribute('aria-expanded', 'true'); }
+  function closeSidebar() { document.body.classList.remove('sidebar-open'); $('menuBtn').setAttribute('aria-expanded', 'false'); }
+
+  // ================= 事件 =================
+  $('menuBtn').addEventListener('click', () =>
+    document.body.classList.contains('sidebar-open') ? closeSidebar() : openSidebar());
+  $('scrim').addEventListener('click', closeSidebar);
+  $('refreshBtn').addEventListener('click', load);
+  $('retryBtn').addEventListener('click', load);
+  $('locateBtn').addEventListener('click', locate);
+
+  document.querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', () => {
+    if (state.mode === b.dataset.mode) return;
+    state.mode = b.dataset.mode;
+    document.querySelectorAll('.seg button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    restyleAll();
+    renderAll();
+  }));
+
+  $('districts').addEventListener('change', (e) => {
+    const d = e.target.dataset.d;
+    if (!d) return;
+    e.target.checked ? state.selected.add(d) : state.selected.delete(d);
+    applyFilter();
+    renderAll();
+  });
+  $('allBtn').addEventListener('click', () => {
+    state.districts.forEach((d) => state.selected.add(d));
+    renderDistricts(); applyFilter(); renderAll();
+  });
+  $('noneBtn').addEventListener('click', () => {
+    state.selected.clear();
+    renderDistricts(); applyFilter(); renderAll();
+  });
+
+  $('nearList').addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-sno]');
+    if (btn) focusStation(btn.dataset.sno);
+  });
+
+  map.on('zoomend', restyleAll);
+  setInterval(updateStatus, 1000);
+
+  load();
+})();
+</script>
+</body>
+</html>
